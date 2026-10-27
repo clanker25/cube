@@ -1,0 +1,22 @@
+import { GenericContainer } from 'testcontainers';
+
+import { DbRunnerAbstract, DBRunnerContainerOptions } from './db-runner.abstract';
+import { startContainerWithRetry } from './start-with-retry';
+
+export class ClickhouseDBRunner extends DbRunnerAbstract {
+  public static startContainer(options: DBRunnerContainerOptions) {
+    const version = process.env.TEST_CLICKHOUSE_VERSION || options.version || '23.11';
+
+    const container = new GenericContainer(`clickhouse/clickhouse-server:${version}`)
+      .withEnvironment({ CLICKHOUSE_SKIP_USER_SETUP: '1' })
+      .withExposedPorts(8123)
+      .withStartupTimeout(10 * 1000);
+
+    if (options.volumes) {
+      const binds = options.volumes.map(v => ({ source: v.source, target: v.target, mode: v.bindMode }));
+      container.withBindMounts(binds);
+    }
+
+    return startContainerWithRetry(container);
+  }
+}

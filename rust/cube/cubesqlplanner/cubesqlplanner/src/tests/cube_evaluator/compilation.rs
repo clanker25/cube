@@ -1,0 +1,1012 @@
+//! Tests for Compiler member evaluation
+
+use crate::planner::symbols::dimension_kinds::DimensionKind;
+use crate::planner::symbols::DimensionType;
+use crate::planner::{AggregationType, CalculatedMeasureType, CubeId, MeasureKind};
+use crate::test_fixtures::cube_bridge::MockSchema;
+use crate::test_fixtures::schemas::TestCompiler;
+use crate::test_fixtures::test_utils::TestContext;
+
+#[test]
+fn test_add_dimension_evaluator_number_dimension() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.id".to_string())
+        .unwrap();
+
+    assert!(symbol.is_dimension());
+    assert!(!symbol.is_measure());
+    assert_eq!(symbol.full_name(), "visitors.id");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert_eq!(symbol.name(), "id");
+    assert_eq!(symbol.get_dependencies().len(), 0);
+    assert!(
+        matches!(symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::Number)
+    );
+}
+
+#[test]
+fn test_add_dimension_evaluator_string_dimension() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.source".to_string())
+        .unwrap();
+
+    assert!(symbol.is_dimension());
+    assert!(!symbol.is_measure());
+    assert_eq!(symbol.full_name(), "visitors.source");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert_eq!(symbol.name(), "source");
+    assert_eq!(symbol.get_dependencies().len(), 0);
+    assert!(
+        matches!(symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::String)
+    );
+}
+
+#[test]
+fn test_add_dimension_evaluator_caching() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol1 = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.id".to_string())
+        .unwrap();
+    let symbol2 = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.id".to_string())
+        .unwrap();
+
+    assert_eq!(symbol1.full_name(), symbol2.full_name());
+}
+
+#[test]
+fn test_add_dimension_evaluator_invalid_path() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let result = test_compiler
+        .compiler
+        .add_dimension_evaluator("nonexistent.dimension".to_string());
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_add_dimension_evaluator_multiple_dimensions() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let id_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.id".to_string())
+        .unwrap();
+    let source_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.source".to_string())
+        .unwrap();
+    let created_at_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.created_at".to_string())
+        .unwrap();
+
+    assert_eq!(id_symbol.full_name(), "visitors.id");
+    assert!(
+        matches!(id_symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::Number)
+    );
+    assert_eq!(source_symbol.full_name(), "visitors.source");
+    assert!(
+        matches!(source_symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::String)
+    );
+    assert_eq!(created_at_symbol.full_name(), "visitors.created_at");
+    assert!(
+        matches!(created_at_symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::Time)
+    );
+    assert_eq!(id_symbol.get_dependencies().len(), 0);
+    assert_eq!(source_symbol.get_dependencies().len(), 0);
+    assert_eq!(created_at_symbol.get_dependencies().len(), 0);
+}
+
+#[test]
+fn test_add_measure_evaluator_count_measure() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitor_checkins.count".to_string())
+        .unwrap();
+
+    assert!(symbol.is_measure());
+    assert!(!symbol.is_dimension());
+    assert_eq!(symbol.full_name(), "visitor_checkins.count");
+    assert_eq!(symbol.cube_id().to_string(), "visitor_checkins");
+    assert_eq!(symbol.name(), "count");
+    assert_eq!(symbol.get_dependencies().len(), 0);
+    assert!(matches!(
+        symbol.as_measure().unwrap().kind(),
+        MeasureKind::Count(_)
+    ));
+}
+
+#[test]
+fn test_add_measure_evaluator_sum_measure() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors.total_revenue".to_string())
+        .unwrap();
+
+    assert!(symbol.is_measure());
+    assert!(!symbol.is_dimension());
+    assert_eq!(symbol.full_name(), "visitors.total_revenue");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert_eq!(symbol.name(), "total_revenue");
+    assert_eq!(symbol.get_dependencies().len(), 0);
+    assert!(matches!(
+        symbol.as_measure().unwrap().kind(),
+        MeasureKind::Aggregated(a) if a.agg_type() == AggregationType::Sum
+    ));
+}
+
+#[test]
+fn test_add_measure_evaluator_caching() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol1 = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors.total_revenue".to_string())
+        .unwrap();
+    let symbol2 = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors.total_revenue".to_string())
+        .unwrap();
+
+    assert_eq!(symbol1.full_name(), symbol2.full_name());
+}
+
+#[test]
+fn test_add_measure_evaluator_invalid_path() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let result = test_compiler
+        .compiler
+        .add_measure_evaluator("nonexistent.measure".to_string());
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_add_measure_evaluator_multiple_measures() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let count_symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitor_checkins.count".to_string())
+        .unwrap();
+    let revenue_symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors.total_revenue".to_string())
+        .unwrap();
+
+    assert_eq!(count_symbol.full_name(), "visitor_checkins.count");
+    assert!(matches!(
+        count_symbol.as_measure().unwrap().kind(),
+        MeasureKind::Count(_)
+    ));
+    assert_eq!(revenue_symbol.full_name(), "visitors.total_revenue");
+    assert!(matches!(
+        revenue_symbol.as_measure().unwrap().kind(),
+        MeasureKind::Aggregated(a) if a.agg_type() == AggregationType::Sum
+    ));
+    assert_eq!(count_symbol.get_dependencies().len(), 0);
+    assert_eq!(revenue_symbol.get_dependencies().len(), 0);
+}
+
+#[test]
+fn test_add_auto_resolved_member_evaluator_dimension() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_auto_resolved_member_evaluator("visitors.source".to_string())
+        .unwrap();
+
+    assert!(symbol.is_dimension());
+    assert!(!symbol.is_measure());
+    assert_eq!(symbol.full_name(), "visitors.source");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert_eq!(symbol.name(), "source");
+    assert_eq!(symbol.get_dependencies().len(), 0);
+    assert!(
+        matches!(symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::String)
+    );
+}
+
+#[test]
+fn test_add_auto_resolved_member_evaluator_measure() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_auto_resolved_member_evaluator("visitors.total_revenue".to_string())
+        .unwrap();
+
+    assert!(symbol.is_measure());
+    assert!(!symbol.is_dimension());
+    assert_eq!(symbol.full_name(), "visitors.total_revenue");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert_eq!(symbol.name(), "total_revenue");
+    assert_eq!(symbol.get_dependencies().len(), 0);
+    assert!(matches!(
+        symbol.as_measure().unwrap().kind(),
+        MeasureKind::Aggregated(a) if a.agg_type() == AggregationType::Sum
+    ));
+}
+
+#[test]
+fn test_add_cube_table_evaluator() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_cube_table_evaluator(CubeId::cube("visitors"), vec![])
+        .unwrap();
+
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+}
+
+#[test]
+fn test_add_cube_name_evaluator() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_cube_name_evaluator(CubeId::cube("visitors"), vec![])
+        .unwrap();
+
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+}
+
+#[test]
+fn test_dimension_with_cube_table_dependency() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.visitor_id".to_string())
+        .unwrap();
+
+    assert!(symbol.is_dimension());
+    assert_eq!(symbol.full_name(), "visitors.visitor_id");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert!(
+        matches!(symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::Number)
+    );
+
+    let dependencies = symbol.get_dependencies();
+    assert_eq!(dependencies.len(), 0, "Should have no member dependencies");
+
+    let cube_refs = symbol.get_cube_refs();
+    assert_eq!(cube_refs.len(), 1, "Should have 1 cube ref dependency");
+    assert_eq!(cube_refs[0].cube_id().to_string(), "visitors");
+}
+
+#[test]
+fn test_dimension_with_member_dependency_no_prefix() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.visitor_id_twice".to_string())
+        .unwrap();
+
+    assert!(symbol.is_dimension());
+    assert_eq!(symbol.full_name(), "visitors.visitor_id_twice");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert!(
+        matches!(symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::Number)
+    );
+
+    let dependencies = symbol.get_dependencies();
+    assert_eq!(
+        dependencies.len(),
+        1,
+        "Should have 1 dependency on visitor_id"
+    );
+
+    let dep = &dependencies[0];
+    assert!(dep.is_dimension(), "Dependency should be a dimension");
+    assert_eq!(dep.full_name(), "visitors.visitor_id");
+    assert_eq!(dep.cube_id().to_string(), "visitors");
+}
+
+#[test]
+fn test_dimension_with_mixed_dependencies() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.source_concat_id".to_string())
+        .unwrap();
+
+    assert!(symbol.is_dimension());
+    assert_eq!(symbol.full_name(), "visitors.source_concat_id");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert!(
+        matches!(symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::String)
+    );
+
+    let dependencies = symbol.get_dependencies();
+    assert_eq!(
+        dependencies.len(),
+        2,
+        "Should have 2 dimension dependencies"
+    );
+
+    for dep in &dependencies {
+        assert!(dep.is_dimension(), "All dependencies should be dimensions");
+        assert_eq!(dep.cube_id().to_string(), "visitors");
+    }
+
+    let dep_names: Vec<String> = dependencies.iter().map(|d| d.full_name()).collect();
+    assert!(
+        dep_names.contains(&"visitors.source".to_string()),
+        "Should have dependency on visitors.source"
+    );
+    assert!(
+        dep_names.contains(&"visitors.visitor_id".to_string()),
+        "Should have dependency on visitors.visitor_id"
+    );
+}
+
+#[test]
+fn test_measure_with_cube_table_dependency() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors.revenue".to_string())
+        .unwrap();
+
+    assert!(symbol.is_measure());
+    assert_eq!(symbol.full_name(), "visitors.revenue");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert!(matches!(
+        symbol.as_measure().unwrap().kind(),
+        MeasureKind::Aggregated(a) if a.agg_type() == AggregationType::Sum
+    ));
+
+    let dependencies = symbol.get_dependencies();
+    assert_eq!(dependencies.len(), 0, "Should have no member dependencies");
+
+    let cube_refs = symbol.get_cube_refs();
+    assert_eq!(cube_refs.len(), 1, "Should have 1 cube ref dependency");
+    assert_eq!(cube_refs[0].cube_id().to_string(), "visitors");
+}
+
+#[test]
+fn test_measure_with_explicit_cube_and_member_dependencies() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors.total_revenue_per_count".to_string())
+        .unwrap();
+
+    assert!(symbol.is_measure());
+    assert_eq!(symbol.full_name(), "visitors.total_revenue_per_count");
+    assert_eq!(symbol.cube_id().to_string(), "visitors");
+    assert!(matches!(
+        symbol.as_measure().unwrap().kind(),
+        MeasureKind::Calculated(c) if c.calc_type() == CalculatedMeasureType::Number
+    ));
+
+    let dependencies = symbol.get_dependencies();
+    assert_eq!(dependencies.len(), 2, "Should have 2 measure dependencies");
+
+    for dep in &dependencies {
+        assert!(dep.is_measure(), "All dependencies should be measures");
+        assert_eq!(dep.cube_id().to_string(), "visitors");
+    }
+
+    let dep_names: Vec<String> = dependencies.iter().map(|d| d.full_name()).collect();
+    assert!(
+        dep_names.contains(&"visitors.count".to_string()),
+        "Should have dependency on visitors.count"
+    );
+    assert!(
+        dep_names.contains(&"visitors.total_revenue".to_string()),
+        "Should have dependency on visitors.total_revenue"
+    );
+}
+
+#[test]
+fn test_view_dimension_compilation() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let id_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors_visitors_checkins.id".to_string())
+        .unwrap();
+
+    assert!(id_symbol.is_dimension());
+    assert_eq!(id_symbol.full_name(), "visitors_visitors_checkins.id");
+    assert_eq!(
+        id_symbol.cube_id().to_string(),
+        "visitors_visitors_checkins"
+    );
+    assert_eq!(id_symbol.name(), "id");
+
+    let reference = id_symbol.as_ref_symbol().unwrap();
+    assert!(id_symbol.is_reference());
+    assert_eq!(
+        reference.target_member().unwrap().full_name(),
+        "visitors.id"
+    );
+    assert!(id_symbol.as_dimension().is_err());
+
+    let resolved = id_symbol.clone().resolve_reference_chain();
+    assert_eq!(
+        resolved.full_name(),
+        "visitors.id",
+        "Should resolve to visitors.id"
+    );
+    assert!(
+        !resolved.as_dimension().unwrap().is_view(),
+        "Resolved member should not be a view"
+    );
+
+    let visitor_id_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors_visitors_checkins.visitor_id".to_string())
+        .unwrap();
+
+    assert!(visitor_id_symbol.is_dimension());
+    assert_eq!(
+        visitor_id_symbol.full_name(),
+        "visitors_visitors_checkins.visitor_id"
+    );
+
+    assert!(visitor_id_symbol.as_ref_symbol().is_ok());
+    assert!(visitor_id_symbol.is_reference(), "Should be a reference");
+
+    let resolved = visitor_id_symbol.clone().resolve_reference_chain();
+    assert_eq!(
+        resolved.full_name(),
+        "visitor_checkins.visitor_id",
+        "Should resolve to visitor_checkins.visitor_id"
+    );
+    assert!(
+        !resolved.as_dimension().unwrap().is_view(),
+        "Resolved member should not be a view"
+    );
+}
+
+#[test]
+fn test_view_measure_compilation() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let count_symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors_visitors_checkins.count".to_string())
+        .unwrap();
+
+    assert!(count_symbol.is_measure());
+    assert_eq!(count_symbol.full_name(), "visitors_visitors_checkins.count");
+    assert_eq!(
+        count_symbol.cube_id().to_string(),
+        "visitors_visitors_checkins"
+    );
+    assert_eq!(count_symbol.name(), "count");
+
+    let reference = count_symbol.as_ref_symbol().unwrap();
+    assert!(count_symbol.is_reference());
+    assert_eq!(
+        reference.target_member().unwrap().full_name(),
+        "visitor_checkins.count"
+    );
+    assert!(count_symbol.as_measure().is_err());
+
+    let resolved = count_symbol.clone().resolve_reference_chain();
+    assert_eq!(
+        resolved.full_name(),
+        "visitor_checkins.count",
+        "Should resolve to visitor_checkins.count"
+    );
+    assert!(
+        !resolved.as_measure().unwrap().is_view(),
+        "Resolved member should not be a view"
+    );
+}
+
+#[test]
+fn test_proxy_dimension_compilation() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let proxy_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.visitor_id_proxy".to_string())
+        .unwrap();
+
+    assert!(proxy_symbol.is_dimension());
+    assert_eq!(proxy_symbol.full_name(), "visitors.visitor_id_proxy");
+    assert_eq!(proxy_symbol.cube_id().to_string(), "visitors");
+    assert_eq!(proxy_symbol.name(), "visitor_id_proxy");
+
+    let dimension = proxy_symbol.as_dimension().unwrap();
+
+    assert!(!dimension.is_view(), "Proxy should not be a view member");
+
+    assert!(
+        dimension.is_reference(),
+        "Proxy should be a reference to another member"
+    );
+
+    let resolved = proxy_symbol.clone().resolve_reference_chain();
+    assert_eq!(
+        resolved.full_name(),
+        "visitors.visitor_id",
+        "Proxy should resolve to visitors.visitor_id"
+    );
+
+    assert!(
+        !resolved.as_dimension().unwrap().is_view(),
+        "Target member should not be a view"
+    );
+
+    assert!(
+        !resolved.as_dimension().unwrap().is_reference(),
+        "Target member should not be a reference"
+    );
+}
+
+#[test]
+fn test_proxy_measure_compilation() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let proxy_symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("visitors.total_revenue_proxy".to_string())
+        .unwrap();
+
+    assert!(proxy_symbol.is_measure());
+    assert_eq!(proxy_symbol.full_name(), "visitors.total_revenue_proxy");
+    assert_eq!(proxy_symbol.cube_id().to_string(), "visitors");
+    assert_eq!(proxy_symbol.name(), "total_revenue_proxy");
+
+    let measure = proxy_symbol.as_measure().unwrap();
+    let dependencies = proxy_symbol.get_dependencies();
+    assert_eq!(dependencies.len(), 1, "Should have 1 measure dependencies");
+
+    assert!(!measure.is_view(), "Proxy should not be a view member");
+
+    assert!(
+        measure.is_reference(),
+        "Proxy should be a reference to another member"
+    );
+
+    let resolved = proxy_symbol.clone().resolve_reference_chain();
+    assert_eq!(
+        resolved.full_name(),
+        "visitors.total_revenue",
+        "Proxy should resolve to visitors.total_revenue"
+    );
+
+    assert!(
+        !resolved.as_measure().unwrap().is_view(),
+        "Target member should not be a view"
+    );
+
+    assert!(
+        !resolved.as_measure().unwrap().is_reference(),
+        "Target member should not be a reference"
+    );
+}
+
+#[test]
+fn test_time_dimension_with_granularity_compilation() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let time_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.created_at.month".to_string())
+        .unwrap();
+
+    assert!(
+        time_symbol.as_time_dimension().is_ok(),
+        "Should be a time dimension"
+    );
+
+    assert_eq!(
+        time_symbol.full_name(),
+        "visitors.created_at_month",
+        "Full name should be visitors.created_at_month"
+    );
+    assert_eq!(time_symbol.cube_id().to_string(), "visitors");
+    assert_eq!(time_symbol.name(), "created_at");
+
+    let time_dim = time_symbol.as_time_dimension().unwrap();
+
+    assert_eq!(
+        time_dim.granularity(),
+        &Some("month".to_string()),
+        "Granularity should be month"
+    );
+
+    assert!(
+        !time_dim.is_reference(),
+        "Time dimension with granularity should not be a reference"
+    );
+
+    let base_symbol = time_dim.base_symbol();
+    assert!(
+        base_symbol.is_dimension(),
+        "Base symbol should be a dimension"
+    );
+    assert_eq!(
+        base_symbol.full_name(),
+        "visitors.created_at",
+        "Base symbol should be visitors.created_at"
+    );
+    assert!(
+        matches!(base_symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::Time),
+        "Base dimension should be time type"
+    );
+}
+
+#[test]
+fn test_sql_deps_validation() {
+    let schema = MockSchema::from_yaml_file("common/visitors.yaml");
+    let evaluator = schema.create_evaluator();
+    let mut test_compiler = TestCompiler::new(evaluator);
+
+    let time_symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("visitors.created_at.month".to_string())
+        .unwrap();
+
+    assert!(
+        time_symbol.as_time_dimension().is_ok(),
+        "Should be a time dimension"
+    );
+
+    assert_eq!(
+        time_symbol.full_name(),
+        "visitors.created_at_month",
+        "Full name should be visitors.created_at_month"
+    );
+    assert_eq!(time_symbol.cube_id().to_string(), "visitors");
+    assert_eq!(time_symbol.name(), "created_at");
+
+    let time_dim = time_symbol.as_time_dimension().unwrap();
+
+    assert_eq!(
+        time_dim.granularity(),
+        &Some("month".to_string()),
+        "Granularity should be month"
+    );
+
+    assert!(
+        !time_dim.is_reference(),
+        "Time dimension with granularity should not be a reference"
+    );
+
+    let base_symbol = time_dim.base_symbol();
+    assert!(
+        base_symbol.is_dimension(),
+        "Base symbol should be a dimension"
+    );
+    assert_eq!(
+        base_symbol.full_name(),
+        "visitors.created_at",
+        "Base symbol should be visitors.created_at"
+    );
+    assert!(
+        matches!(base_symbol.as_dimension().unwrap().kind(), DimensionKind::Regular(r) if *r.dimension_type() == DimensionType::Time),
+        "Base dimension should be time type"
+    );
+}
+
+#[test]
+fn test_sql_regular_dimension_wrong_cube_ref() {
+    let schema = MockSchema::from_yaml_file("compilation_tests/wrong_cube_refs_test.yaml");
+    let context = TestContext::new(schema).unwrap();
+    let wron_dims = vec![
+        "users.otherCubeRefInSql",
+        "users.otherCubeRefInSql2",
+        "users.otherCubeRefInLongitude",
+        "users.otherCubeRefInLatitude",
+        "users.otherCubeRefInCaseItem",
+        "users.otherCubeRefInCaseSwitchSwitch",
+        "users.otherCubeRefInCaseSwitchItem",
+        "users.otherCubeRefInCaseSwitchElse",
+    ];
+
+    for dim in wron_dims {
+        assert!(
+            context.create_dimension(dim).is_err(),
+            "Dimension {} should not compile",
+            dim
+        );
+    }
+}
+
+#[test]
+fn test_sql_multi_stage_dimension_wrong_cube_ref() {
+    let schema = MockSchema::from_yaml_file("compilation_tests/wrong_cube_refs_test.yaml");
+    let context = TestContext::new(schema).unwrap();
+    let wron_dims = vec![
+        "users.multiStageCubeRefInSql",
+        "users.multiStageOtherCubeRefInSql",
+        "users.multiStageCubeRefInLongitude",
+        "users.multiStageCubeRefInLatitude",
+        "users.multiStageCubeRefInCaseItem",
+        "users.multiStageCubeRefInCaseSwitchSwitch",
+        "users.multiStageCubeRefInCaseSwitchItem",
+        "users.multiStageCubeRefInCaseSwitchElse",
+    ];
+
+    for dim in wron_dims {
+        assert!(
+            context.create_dimension(dim).is_err(),
+            "Dimension {} should not compile",
+            dim
+        );
+    }
+}
+
+#[test]
+fn test_sql_multi_stage_dimension_wihtout_member_ref() {
+    let schema = MockSchema::from_yaml_file("compilation_tests/wrong_cube_refs_test.yaml");
+    let context = TestContext::new(schema).unwrap();
+    let wron_dims = vec![
+        "users.multiStageWithoutRefInSql",
+        "users.multiStageWithoutRefInLongitude",
+        "users.multiStageWithoutRefInLatitude",
+        "users.multiStageWithoutRefInCaseItem",
+        "users.multiStageWithoutRefInCaseSwitchSwitch",
+        "users.multiStageWithoutRefInCaseSwitchItem",
+        "users.multiStageWithoutRefInCaseSwitchElse",
+    ];
+
+    for dim in wron_dims {
+        assert!(
+            context.create_dimension(dim).is_err(),
+            "Dimension {} should not compile",
+            dim
+        );
+    }
+}
+
+#[test]
+fn test_sql_multi_stage_measures() {
+    let schema = MockSchema::from_yaml_file("compilation_tests/wrong_cube_refs_test.yaml");
+    let context = TestContext::new(schema).unwrap();
+    let wron_dims = vec![
+        "users.mOtherCubeRefInSql",
+        "users.mMultiStageCubeRefInSql",
+        "users.mMultiStageWithoutRefInCaseSwitchSwitch",
+        "users.mMultiStageWithoutRefInCaseSwitchItem",
+        "users.mMultiStageWithoutRefInCaseSwitchElse",
+    ];
+
+    for dim in wron_dims {
+        assert!(
+            context.create_dimension(dim).is_err(),
+            "Dimension {} should not compile",
+            dim
+        );
+    }
+}
+
+fn view_members_compiler() -> TestCompiler {
+    let schema = MockSchema::from_yaml_file("common/integration_view_members.yaml");
+    TestCompiler::new(schema.create_evaluator())
+}
+
+#[test]
+fn test_view_calculated_dimension_is_not_a_reference() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("orders_view.status_label".to_string())
+        .unwrap();
+
+    let dimension = symbol.as_dimension().unwrap();
+    assert!(dimension.is_view());
+    assert!(!dimension.is_reference());
+    let deps = symbol
+        .get_dependencies()
+        .iter()
+        .map(|dep| dep.full_name())
+        .collect::<Vec<_>>();
+    assert_eq!(deps, vec!["orders.status", "orders_view.name"]);
+}
+
+#[test]
+fn test_view_calculated_measure_is_not_a_reference() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("orders_view.amount_per_order".to_string())
+        .unwrap();
+
+    let measure = symbol.as_measure().unwrap();
+    assert!(measure.is_view());
+    assert!(!measure.is_reference());
+    assert!(measure.is_calculated());
+}
+
+// A member the view declares itself keeps its own definition even when its sql
+// is a direct reference; it references a re-exported sibling, which resolves to
+// the cube member.
+#[test]
+fn test_view_sibling_reference_resolves_to_cube_member() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("orders_view.status_ref".to_string())
+        .unwrap();
+
+    assert!(symbol.as_dimension().unwrap().is_view());
+    assert!(symbol.is_reference());
+    let target = symbol.reference_member().unwrap();
+    assert_eq!(target.full_name(), "orders_view.status");
+    assert!(target.as_ref_symbol().is_ok());
+    assert_eq!(
+        symbol.clone().resolve_reference_chain().full_name(),
+        "orders.status"
+    );
+}
+
+#[test]
+fn test_view_hand_written_reference_resolves_to_cube_member() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("orders_view.total_amount_ref".to_string())
+        .unwrap();
+
+    assert!(symbol.as_measure().unwrap().is_view());
+    assert!(symbol.is_reference());
+    assert_eq!(
+        symbol.clone().resolve_reference_chain().full_name(),
+        "orders.total_amount"
+    );
+}
+
+// A view member's mask is compiled against the cube that owns the target, and
+// its dependencies follow the target.
+#[test]
+fn test_view_member_mask_depends_on_target_cube_members() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("orders_view.masked_status_dep".to_string())
+        .unwrap();
+
+    assert!(symbol.as_ref_symbol().unwrap().mask_sql().is_some());
+    let deps = symbol
+        .get_dependencies()
+        .iter()
+        .map(|dep| dep.full_name())
+        .collect::<Vec<_>>();
+    assert_eq!(deps, vec!["orders.masked_status_dep", "orders.id"]);
+    assert_eq!(
+        symbol.reference_member().unwrap().full_name(),
+        "orders.masked_status_dep"
+    );
+}
+
+#[test]
+fn test_view_custom_granularity_time_dimension() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("orders_view.created_at.bi_weekly".to_string())
+        .unwrap();
+
+    let time_dimension = symbol.as_time_dimension().unwrap();
+    assert_eq!(time_dimension.granularity().as_deref(), Some("bi_weekly"));
+    assert!(time_dimension.granularity_obj().is_some());
+    assert_eq!(
+        time_dimension.base_symbol().full_name(),
+        "orders_view.created_at"
+    );
+    assert!(time_dimension.base_symbol().as_ref_symbol().is_ok());
+    assert_eq!(
+        symbol.reference_member().unwrap().full_name(),
+        "orders.created_at_bi_weekly"
+    );
+}
+
+// A view member that aggregates the member it names computes something of its
+// own, so it is not a reference.
+#[test]
+fn test_view_own_aggregation_is_not_a_reference() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_measure_evaluator("orders_view.distinct_customers".to_string())
+        .unwrap();
+
+    let measure = symbol.as_measure().unwrap();
+    assert!(measure.is_view());
+    assert!(!symbol.is_reference());
+    assert!(matches!(
+        measure.kind(),
+        MeasureKind::Aggregated(a) if a.agg_type() == AggregationType::CountDistinct
+    ));
+}
+
+#[test]
+fn test_view_own_sub_query_dimension_is_not_a_reference() {
+    let mut test_compiler = view_members_compiler();
+
+    let symbol = test_compiler
+        .compiler
+        .add_dimension_evaluator("customers_view.orders_count".to_string())
+        .unwrap();
+
+    let dimension = symbol.as_dimension().unwrap();
+    assert!(dimension.is_view());
+    assert!(dimension.is_sub_query());
+    assert!(!symbol.is_reference());
+}

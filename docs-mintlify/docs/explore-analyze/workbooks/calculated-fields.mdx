@@ -1,0 +1,214 @@
+---
+title: Calculated fields
+description: Create ad-hoc custom dimensions and measures with Semantic SQL in workbooks, with help from AI or the field picker.
+---
+
+Calculated fields are ad-hoc dimensions and measures you add to a workbook
+report. You can [promote][ref-promote] a calculated dimension to a workbook field
+to use it in other reports of the workbook and on its dashboards. Calculated
+fields do not change the shared data model.
+
+As described in [Semantic SQL](/docs/introduction#semantic-sql), Cube routes
+analysis through the semantic layer instead of sending arbitrary SQL straight to
+the warehouse. The runtime validates every request and applies your security
+policies. Semantic SQL builds on Postgres-compatible SQL—including the
+`MEASURE()` function—so you can express derived logic on top of existing
+semantic definitions with both flexibility and governance.
+
+Calculated fields are expressed as Semantic SQL and pushed down to the Cube
+backend for evaluation. The semantic layer compiles them with the rest of the
+query—rather than applying them only in the browser—so the same validation,
+governance, and warehouse execution path apply as for any other Semantic SQL
+analysis.
+
+## Using AI to create calculated fields
+
+You can ask the Cube AI agent to create custom calculations in natural language.
+The agent can add or refine calculated fields from different parts of the
+product—for example while exploring in **Analytics chat** or working in
+**Workbooks**—so you are not limited to a single entry point when you want a new
+metric or dimension for the analysis in front of you.
+
+## Creating calculated fields in UI
+
+You can also build and edit calculated fields directly in the workbook. New
+fields appear in the **Query fields** section of the field picker sidebar and
+belong to the current report. To reuse a dimension in other reports and on
+dashboards, [promote it to a workbook field](#promoting-to-a-workbook-field).
+
+### Aggregations from existing dimensions
+
+Right-click a dimension column header and choose an aggregation to create a
+calculated field automatically. Available aggregations depend on the column type:
+
+| Column type | Available aggregations |
+| --- | --- |
+| Number | Count Distinct, Sum, Average, Min, Max |
+| Time | Count Distinct, Min, Max |
+| String, Boolean | Count Distinct |
+
+### Calculations from existing measures
+
+Open the menu on a measure column header and use the **Calculations** submenu
+for derived calculations:
+
+| Calculation | Description |
+| --- | --- |
+| % of total | Ratio of the measure value to the total across all rows |
+| % of previous | Ratio of the measure value to the previous row's value |
+| % change from previous | Percentage change compared to the previous row |
+| Running total | Cumulative sum of the measure across rows |
+
+<Info>
+
+**% of previous**, **% change from previous**, and **Running total** require at
+least one dimension in the query.
+
+</Info>
+
+Which calculations are offered depends on the measure’s aggregation type:
+
+| Aggregation type | Available calculations |
+| --- | --- |
+| Count, Sum | All calculations |
+| Min, Max | Running total |
+| Average, Count Distinct | None |
+
+### Filtered measures
+
+When working with query **Results**, pivot so at least one dimension is on
+columns, then open the header menu on a **pivoted measure column** and choose
+**Create filtered measure**. Cube adds a calculated measure that applies the
+column’s slice—for example, from **Count** broken down by **Status**, you get a
+measure that only aggregates rows matching that status (such as completed
+orders only).
+
+The option appears only for **native** measures on pivoted columns, not for
+calculated fields. The same flow works in **Explore** when results are pivoted
+the same way.
+
+### Bins and value groups
+
+You can also bucket an existing dimension without writing SQL. Open its menu in
+the field picker sidebar and choose **Create bins…** on a number dimension, or
+**Group values…** on a string or boolean one (grouping a boolean dimension is
+how you rename its `true`/`false` values). Time dimensions have granularities
+instead, and an already derived field cannot be bucketed again.
+
+<Frame>
+  <img
+    src="https://ucarecdn.com/b9890dd7-d82c-4126-a2e5-2f3948eafa72/772aa0f9-light.png"
+    alt="The Create bins panel on a number dimension, showing typed boundaries, the label styles, a preview of the five buckets, and the generated Semantic SQL"
+  />
+</Frame>
+
+**Bins** take their boundaries either as a list (**Custom ranges**) or from a
+**Range start** and **Range end** (**Equal intervals**), which are prefilled
+from the column's own minimum and maximum. For equal intervals, choose whether
+the range is split by **Number of bins** or by a fixed **Bin size**. Each
+boundary opens a bucket that includes its lower bound and excludes the upper
+one, and two open-ended buckets are added at the edges—so `0, 18, 25` yields
+`< 0`, `[0, 18)`, `[18, 25)`, `>= 25`, and no row is dropped. **Label style**
+renders a bucket as `[10, 20)`, `>= 10 and < 20`, `10 to 19` (offered only while
+every boundary is a whole number), or **Custom**, which lets you type your own
+label for each bucket. Turn off **Label empty values separately** to fold rows
+where the dimension is `NULL` into the last bucket instead of reporting them
+under their own label (`Unknown` by default).
+
+**Value groups** collect the dimension's values into named sets: pick values, name
+the group, and choose **Add group**. A value belongs to one group at a time, and
+an existing group's picked values can be changed later via **Edit group**. By
+default, whatever you did not pick—including empty values—falls under
+**Everything else**, which defaults to `Other`; turn off **Group remaining
+values** to have those rows return `NULL` instead.
+
+Bucket labels carry their position as a prefix (`1.`, `2.`, zero-padded past nine
+buckets) so that sorting the column sorts it by value rather than alphabetically,
+which would put `>= 25` before `[0, 18)`. The prefix is visible in results, chart
+legends, and axes.
+
+<Frame>
+  <img
+    src="https://ucarecdn.com/23ac9cbb-7503-4326-b74c-134ad54e5e7a/6cffb52c-light.png"
+    alt="A workbook result grouped by the bucketed field: one row per bucket, with the created field listed under Query fields in the sidebar"
+  />
+</Frame>
+
+The panel previews the Semantic SQL it generates as you build:
+
+```sql
+CASE WHEN orders_view.age IS NULL THEN 'Unknown'
+  WHEN orders_view.age < 0 THEN '1. < 0'
+  WHEN orders_view.age < 18 THEN '2. [0, 18)'
+  ELSE '3. >= 18' END
+```
+
+<Info>
+
+**Equal intervals** ranges are resolved into boundaries when the field is created, not
+recomputed from the data. Values arriving later outside the range join the first
+and last buckets instead of extending them.
+
+</Info>
+
+To change a bucketed field, choose **Edit bins…** or **Edit groups…** from its
+menu—either in the sidebar or on its column header in the results. Only fields
+this panel generated offer the action; a `CASE` expression written by hand does
+not.
+
+A bucketed field can also be **filtered**, the same way as a native dimension —
+choose **Filter** from its menu. The value picker offers only the bucket's own
+labels (e.g. `Picked` and `Other`), since a bucket can't return a value it
+wasn't built to produce, and `is null` / `is not null` are offered only when
+the bucket can actually return `NULL`. Editing the bucket afterward keeps the
+filter's selection where possible — renaming a label moves the selection with
+it — but changing the number of buckets drops a selection that no longer
+matches, since the underlying structure changed.
+
+### Promoting to a workbook field
+
+A query field belongs to one report. A **workbook field** belongs to the
+workbook: it is listed under **Workbook fields** in the field picker sidebar
+of every report on the same semantic view, and dashboard
+[filters and field switchers](#using-calculated-fields-on-dashboards) can
+target it.
+
+To promote a calculated dimension, choose **Promote to workbook field** from its
+column header menu in the results or from its menu in the sidebar. In the
+**Save Calculated Field** dialog, enter a **Name** and, optionally, a
+**Title**, **Description** and **Format**, then choose **Save**. The field
+stays a dimension, and **Value Type** is prefilled from its SQL.
+
+Only dimensions can be promoted. Calculated measures stay query fields.
+
+### Editing a calculated field
+
+Select a query field in the sidebar to open the editor. You can change its
+**SQL expression**, then choose **Update** to apply.
+
+Select a workbook field in the sidebar to open the **Update Calculated Field**
+dialog. You can change its **Title**, **Description**, **Format** and
+**Expression**. Its **Name** does not change, because reports and dashboards
+find the field by it, and neither does the **Value Type** of a dimension,
+because dashboard controls are set up for it.
+
+When you update the expression of a workbook dimension, every report of the
+workbook on that semantic view that still uses the previous expression gets
+the new one. A report where you changed the expression yourself keeps it.
+
+## Using calculated fields on dashboards
+
+A workbook calculated dimension can be the target of a dashboard
+[filter][ref-filter] and an alternative on a dimension
+[field switcher][ref-field-switcher]. Both pickers list such fields under
+**Workbook fields**. A field whose name the data model also defines is not
+listed.
+
+A control on a calculated dimension has some limitations: see the
+[filter][ref-filter] and [field switcher][ref-field-switcher] sections. A
+published dashboard keeps the field's definition from the moment you publish
+it; publish again to show your edits to viewers.
+
+[ref-promote]: #promoting-to-a-workbook-field
+[ref-filter]: /docs/explore-analyze/dashboards/widgets/controls#calculated-dimensions
+[ref-field-switcher]: /docs/explore-analyze/dashboards/widgets/controls#choosing-what-it-switches

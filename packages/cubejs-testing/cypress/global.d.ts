@@ -1,0 +1,21 @@
+/// <reference types="cypress" />
+
+declare namespace Cypress {
+  interface Chainable {
+    getByTestId(dataTestAttribute: string, args?: any): Chainable<JQuery<HTMLElement>>;
+
+    getByQa(dataTestAttribute: string, args?: any): Chainable<JQuery<HTMLElement>>;
+
+    setQuery(query: Object, args?: any): void;
+
+    setChartType(chartType: string): void;
+
+    addMeasure(measureName: string): void;
+
+    addDimension(dimensionName: string): void;
+
+    runQuery(timeout?: number): void;
+
+    getLocalStorage(item: string): Chainable<string | null>;
+  }
+}

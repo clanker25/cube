@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": [
+    "src",
+    "test"
+  ],
+  "compilerOptions": {
+    "types": ["node", "jest"],
+    "outDir": "dist",
+    "rootDir": ".",
+  },
+  "references": [
+    { "path": "../cubejs-backend-shared" },
+    { "path": "../cubejs-client-core" },
+    { "path": "../cubejs-client-ws-transport" },
+    { "path": "../cubejs-cubestore-driver" },
+    { "path": "../cubejs-ksql-driver" },
+    { "path": "../cubejs-postgres-driver" },
+    { "path": "../cubejs-query-orchestrator" },
+    { "path": "../cubejs-schema-compiler" },
+    { "path": "../cubejs-testing-shared" }
+  ]
+}
